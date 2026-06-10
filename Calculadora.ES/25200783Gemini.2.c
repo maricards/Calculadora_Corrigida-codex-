@@ -1,6 +1,5 @@
 #include "calculadora.h"
 
-#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +7,7 @@
 
 #define MAX_TOKENS 128
 #define MAX_EXPR 512
-#define PI 3.14159265358979323846f
+#define PI 3.14159265358979323846
 #define EPSILON 0.000001f
 
 typedef struct {
@@ -53,12 +52,9 @@ static int ehNumero(const char *token, float *valor) {
 
 static int precisaParentesesEsquerda(const ItemInfixo *item, char operadorAtual) {
     int prioridadeAtual = prioridadeOperador(operadorAtual);
-    
-    // Se o item esquerdo tem prioridade menor, precisa de parenteses
     if (item->prioridade < prioridadeAtual) {
         return 1;
     }
-    // Caso especial do operador ^ (associatividade a direita)
     if (operadorAtual == '^' && item->prioridade == prioridadeAtual) {
         return 1;
     }
@@ -67,13 +63,6 @@ static int precisaParentesesEsquerda(const ItemInfixo *item, char operadorAtual)
 
 static int precisaParentesesDireita(const ItemInfixo *item, char operadorAtual) {
     int prioridadeAtual = prioridadeOperador(operadorAtual);
-    
-    // Forca parenteses se o operador atual for + ou - e o bloco da direita for uma subexpressao composta (*, /, %, ^)
-    // Isso garante exatamente o comportamento dos testes 3 e 5 da tabela do professor
-    if ((operadorAtual == '+' || operadorAtual == '-') && item->prioridade > 1 && item->prioridade < 4) {
-        return 1;
-    }
-    
     if (item->prioridade < prioridadeAtual) {
         return 1;
     }
@@ -102,47 +91,26 @@ static int montaExpressaoBinaria(ItemInfixo *destino,
     } else {
         escritos = snprintf(ladoEsquerdo, sizeof(ladoEsquerdo), "%s", esquerda->texto);
     }
-    if (escritos < 0 || escritos >= (int)sizeof(ladoEsquerdo)) {
-        return 0;
-    }
+    if (escritos < 0 || escritos >= (int)sizeof(ladoEsquerdo)) return 0;
 
     if (precisaParentesesDireita(direita, operador)) {
         escritos = snprintf(ladoDireito, sizeof(ladoDireito), "(%s)", direita->texto);
     } else {
         escritos = snprintf(ladoDireito, sizeof(ladoDireito), "%s", direita->texto);
     }
-    if (escritos < 0 || escritos >= (int)sizeof(ladoDireito)) {
-        return 0;
-    }
+    if (escritos < 0 || escritos >= (int)sizeof(ladoDireito)) return 0;
 
-    escritos = snprintf(destino->texto,
-                        sizeof(destino->texto),
-                        "%s %c %s",
-                        ladoEsquerdo,
-                        operador,
-                        ladoDireito);
-
-    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) {
-        return 0;
-    }
+    escritos = snprintf(destino->texto, sizeof(destino->texto), "%s%c%s", ladoEsquerdo, operador, ladoDireito);
+    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) return 0;
 
     destino->prioridade = prioridadeOperador(operador);
     destino->operador = operador;
     return 1;
 }
 
-static int montaExpressaoUnaria(ItemInfixo *destino,
-                                const ItemInfixo *operando,
-                                const char *operador) {
-    int escritos = snprintf(destino->texto,
-                            sizeof(destino->texto),
-                            "%s(%s)",
-                            operador,
-                            operando->texto);
-
-    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) {
-        return 0;
-    }
+static int montaExpressaoUnaria(ItemInfixo *destino, const ItemInfixo *operando, const char *operador) {
+    int escritos = snprintf(destino->texto, sizeof(destino->texto), "%s(%s)", operador, operando->texto);
+    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) return 0;
 
     destino->prioridade = 4;
     destino->operador = '\0';
@@ -151,42 +119,26 @@ static int montaExpressaoUnaria(ItemInfixo *destino,
 
 static int aplicaBinario(float a, float b, char operador, float *resultado) {
     switch (operador) {
-        case '+':
-            *resultado = a + b;
-            return 1;
-        case '-':
-            *resultado = a - b;
-            return 1;
-        case '*':
-            *resultado = a * b;
-            return 1;
+        case '+': *resultado = a + b; return 1;
+        case '-': *resultado = a - b; return 1;
+        case '*': *resultado = a * b; return 1;
         case '/':
-            if (fabsf(b) < EPSILON) {
-                return 0;
-            }
+            if (fabsf(b) < EPSILON) return 0;
             *resultado = a / b;
             return 1;
         case '%':
-            if (fabsf(b) < EPSILON) {
-                return 0;
-            }
+            if (fabsf(b) < EPSILON) return 0;
             *resultado = fmodf(a, b);
             return 1;
-        case '^':
-            *resultado = powf(a, b);
-            return 1;
-        default:
-            return 0;
+        case '^': *resultado = powf(a, b); return 1;
+        default: return 0;
     }
 }
 
 static int aplicaUnario(float a, const char *operador, float *resultado) {
-    float radianos = a * PI / 180.0f;
-
+    float radianos = (float)(a * PI / 180.0);
     if (strcmp(operador, "raiz") == 0) {
-        if (a < 0.0f) {
-            return 0;
-        }
+        if (a < 0.0f) return 0;
         *resultado = sqrtf(a);
         return 1;
     }
@@ -199,16 +151,12 @@ static int aplicaUnario(float a, const char *operador, float *resultado) {
         return 1;
     }
     if (strcmp(operador, "tg") == 0) {
-        if (fabsf(cosf(radianos)) < EPSILON) {
-            return 0;
-        }
+        if (fabsf(cosf(radianos)) < EPSILON) return 0;
         *resultado = tanf(radianos);
         return 1;
     }
     if (strcmp(operador, "log") == 0) {
-        if (a <= 0.0f) {
-            return 0;
-        }
+        if (a <= 0.0f) return 0;
         *resultado = log10f(a);
         return 1;
     }
@@ -218,6 +166,7 @@ static int aplicaUnario(float a, const char *operador, float *resultado) {
 char *getInFixa(char *Str) {
     char copia[MAX_EXPR];
     char *token = NULL;
+    char *resultado = NULL;
     ItemInfixo pilha[MAX_TOKENS];
     int topo = 0;
 
@@ -225,25 +174,22 @@ char *getInFixa(char *Str) {
         return NULL;
     }
 
+    memset(pilha, 0, sizeof(pilha));
     strcpy(copia, Str);
     token = strtok(copia, " \t\r\n");
 
     while (token != NULL) {
         float valorNumerico;
-
         if (ehNumero(token, &valorNumerico)) {
-            if (topo >= MAX_TOKENS) {
-                return NULL;
-            }
+            if (topo >= MAX_TOKENS) return NULL;
             snprintf(pilha[topo].texto, sizeof(pilha[topo].texto), "%s", token);
             pilha[topo].prioridade = 4;
             pilha[topo].operador = '\0';
             topo++;
         } else if (ehOperadorBinario(token)) {
             ItemInfixo novoItem;
-            if (topo < 2) {
-                return NULL;
-            }
+            memset(&novoItem, 0, sizeof(novoItem));
+            if (topo < 2) return NULL;
             if (!montaExpressaoBinaria(&novoItem, &pilha[topo - 2], &pilha[topo - 1], token[0])) {
                 return NULL;
             }
@@ -251,9 +197,8 @@ char *getInFixa(char *Str) {
             topo--;
         } else if (ehOperadorUnario(token)) {
             ItemInfixo novoItem;
-            if (topo < 1) {
-                return NULL;
-            }
+            memset(&novoItem, 0, sizeof(novoItem));
+            if (topo < 1) return NULL;
             if (!montaExpressaoUnaria(&novoItem, &pilha[topo - 1], token)) {
                 return NULL;
             }
@@ -264,14 +209,11 @@ char *getInFixa(char *Str) {
         token = strtok(NULL, " \t\r\n");
     }
 
-    if (topo != 1) {
-        return NULL;
-    }
+    if (topo != 1) return NULL;
 
-    char *resultado = (char *)malloc(strlen(pilha[0].texto) + 1);
-    if (resultado == NULL) {
-        return NULL;
-    }
+    resultado = (char *)malloc(strlen(pilha[0].texto) + 1);
+    if (resultado == NULL) return NULL;
+
     strcpy(resultado, pilha[0].texto);
     return resultado;
 }
@@ -291,18 +233,13 @@ float getValor(char *Str) {
 
     while (token != NULL) {
         float valorNumerico;
-
         if (ehNumero(token, &valorNumerico)) {
-            if (topo >= MAX_TOKENS) {
-                return NAN;
-            }
+            if (topo >= MAX_TOKENS) return NAN;
             pilha[topo] = valorNumerico;
             topo++;
         } else if (ehOperadorBinario(token)) {
             float resultado;
-            if (topo < 2) {
-                return NAN;
-            }
+            if (topo < 2) return NAN;
             if (!aplicaBinario(pilha[topo - 2], pilha[topo - 1], token[0], &resultado)) {
                 return NAN;
             }
@@ -310,9 +247,7 @@ float getValor(char *Str) {
             topo--;
         } else if (ehOperadorUnario(token)) {
             float resultado;
-            if (topo < 1) {
-                return NAN;
-            }
+            if (topo < 1) return NAN;
             if (!aplicaUnario(pilha[topo - 1], token, &resultado)) {
                 return NAN;
             }
@@ -323,8 +258,6 @@ float getValor(char *Str) {
         token = strtok(NULL, " \t\r\n");
     }
 
-    if (topo != 1) {
-        return NAN;
-    }
+    if (topo != 1) return NAN;
     return pilha[0];
 }

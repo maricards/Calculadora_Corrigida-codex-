@@ -1,0 +1,262 @@
+#include "calculadora.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_TOKENS 128
+#define MAX_EXPR 512
+#define PI 3.14159265358979323846
+#define EPSILON 0.000001f
+
+typedef struct {
+    char texto[MAX_EXPR];
+    int prioridade;
+    char operador;
+} ItemInfixo;
+
+static int ehOperadorBinario(const char *token) {
+    return strlen(token) == 1 && strchr("+-*/%^", token[0]) != NULL;
+}
+
+static int ehOperadorUnario(const char *token) {
+    return strcmp(token, "raiz") == 0 ||
+           strcmp(token, "sen") == 0 ||
+           strcmp(token, "cos") == 0 ||
+           strcmp(token, "tg") == 0 ||
+           strcmp(token, "log") == 0;
+}
+
+static int prioridadeOperador(char operador) {
+    if (operador == '+' || operador == '-') return 1;
+    if (operador == '*' || operador == '/' || operador == '%') return 2;
+    if (operador == '^') return 3;
+    return 4;
+}
+
+static int ehNumero(const char *token, float *valor) {
+    char *fim = NULL;
+    int i = 0;
+    int pontos = 0;
+    int digitos = 0;
+
+    if (token == NULL || token[0] == '\0') return 0;
+
+    if (token[0] == '-' || token[0] == '+') i = 1;
+
+    for (; token[i] != '\0'; i++) {
+        if (token[i] == '.') {
+            pontos++;
+            if (pontos > 1) return 0;
+        } else if (token[i] >= '0' && token[i] <= '9') {
+            digitos++;
+        } else {
+            return 0;
+        }
+    }
+
+    if (digitos == 0) return 0;
+    if (pontos > 0 && token[i - 1] == '.') return 0;
+
+    *valor = strtof(token, &fim);
+    return fim != token && *fim == '\0';
+}
+
+static int precisaParentesesEsquerda(const ItemInfixo *item, char operadorAtual) {
+    int prioridadeAtual = prioridadeOperador(operadorAtual);
+    if (item->prioridade < prioridadeAtual) return 1;
+    if (operadorAtual == '^' && item->prioridade == prioridadeAtual) return 1;
+    return 0;
+}
+
+static int precisaParentesesDireita(const ItemInfixo *item, char operadorAtual) {
+    int prioridadeAtual = prioridadeOperador(operadorAtual);
+    if (item->prioridade < prioridadeAtual) return 1;
+    if ((operadorAtual == '-' || operadorAtual == '/' || operadorAtual == '%') &&
+        item->prioridade == prioridadeAtual) return 1;
+    if (operadorAtual == '*' &&
+        item->prioridade == prioridadeAtual &&
+        (item->operador == '/' || item->operador == '%')) return 1;
+    return 0;
+}
+
+static int montaExpressaoBinaria(ItemInfixo *destino,
+                                 const ItemInfixo *esquerda,
+                                 const ItemInfixo *direita,
+                                 char operador) {
+    char ladoEsquerdo[MAX_EXPR];
+    char ladoDireito[MAX_EXPR];
+    int escritos;
+
+    if (precisaParentesesEsquerda(esquerda, operador))
+        escritos = snprintf(ladoEsquerdo, sizeof(ladoEsquerdo), "(%s)", esquerda->texto);
+    else
+        escritos = snprintf(ladoEsquerdo, sizeof(ladoEsquerdo), "%s", esquerda->texto);
+    if (escritos < 0 || escritos >= (int)sizeof(ladoEsquerdo)) return 0;
+
+    if (precisaParentesesDireita(direita, operador))
+        escritos = snprintf(ladoDireito, sizeof(ladoDireito), "(%s)", direita->texto);
+    else
+        escritos = snprintf(ladoDireito, sizeof(ladoDireito), "%s", direita->texto);
+    if (escritos < 0 || escritos >= (int)sizeof(ladoDireito)) return 0;
+
+    escritos = snprintf(destino->texto, sizeof(destino->texto), "%s%c%s",
+                        ladoEsquerdo, operador, ladoDireito);
+    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) return 0;
+
+    destino->prioridade = prioridadeOperador(operador);
+    destino->operador = operador;
+    return 1;
+}
+
+static int montaExpressaoUnaria(ItemInfixo *destino,
+                                const ItemInfixo *operando,
+                                const char *operador) {
+    int escritos = snprintf(destino->texto, sizeof(destino->texto),
+                            "%s(%s)", operador, operando->texto);
+    if (escritos < 0 || escritos >= (int)sizeof(destino->texto)) return 0;
+    destino->prioridade = 4;
+    destino->operador = '\0';
+    return 1;
+}
+
+static int eValorInvalidoUnario(float a, const char *operador) {
+    if (strcmp(operador, "raiz") == 0 && a < 0.0f) return 1;
+    if (strcmp(operador, "log") == 0 && a <= 0.0f) return 1;
+    return 0;
+}
+
+static int eValorInvalidoBinario(float b, char operador) {
+    if ((operador == '/' || operador == '%') && fabsf(b) < EPSILON) return 1;
+    return 0;
+}
+
+static int aplicaBinario(float a, float b, char operador, float *resultado) {
+    switch (operador) {
+        case '+': *resultado = a + b; return 1;
+        case '-': *resultado = a - b; return 1;
+        case '*': *resultado = a * b; return 1;
+        case '/':
+            if (fabsf(b) < EPSILON) return 0;
+            *resultado = a / b; return 1;
+        case '%':
+            if (fabsf(b) < EPSILON) return 0;
+            *resultado = fmodf(a, b); return 1;
+        case '^': *resultado = powf(a, b); return 1;
+        default: return 0;
+    }
+}
+
+static int aplicaUnario(float a, const char *operador, float *resultado) {
+    float radianos = (float)(a * PI / 180.0);
+    if (strcmp(operador, "raiz") == 0) {
+        if (a < 0.0f) return 0;
+        *resultado = sqrtf(a); return 1;
+    }
+    if (strcmp(operador, "sen") == 0) { *resultado = sinf(radianos); return 1; }
+    if (strcmp(operador, "cos") == 0) { *resultado = cosf(radianos); return 1; }
+    if (strcmp(operador, "tg") == 0) {
+        if (fabsf(cosf(radianos)) < EPSILON) return 0;
+        *resultado = tanf(radianos); return 1;
+    }
+    if (strcmp(operador, "log") == 0) {
+        if (a <= 0.0f) return 0;
+        *resultado = log10f(a); return 1;
+    }
+    return 0;
+}
+
+char *getInFixa(char *Str) {
+    char copia[MAX_EXPR];
+    char *token = NULL;
+    ItemInfixo pilha[MAX_TOKENS];
+    float valoresPilha[MAX_TOKENS];
+    int topo = 0;
+
+    if (Str == NULL || strlen(Str) >= sizeof(copia)) return NULL;
+    strcpy(copia, Str);
+    token = strtok(copia, " \t\r\n");
+
+    while (token != NULL) {
+        float valorNumerico;
+        if (ehNumero(token, &valorNumerico)) {
+            if (topo >= MAX_TOKENS) return NULL;
+            snprintf(pilha[topo].texto, sizeof(pilha[topo].texto), "%s", token);
+            pilha[topo].prioridade = 4;
+            pilha[topo].operador = '\0';
+            valoresPilha[topo] = valorNumerico;
+            topo++;
+        } else if (ehOperadorBinario(token)) {
+            ItemInfixo novoItem;
+            float novoValor;
+            if (topo < 2) return NULL;
+            if (eValorInvalidoBinario(valoresPilha[topo - 1], token[0])) return NULL;
+            if (!aplicaBinario(valoresPilha[topo - 2], valoresPilha[topo - 1], token[0], &novoValor))
+                return NULL;
+            if (!montaExpressaoBinaria(&novoItem, &pilha[topo - 2], &pilha[topo - 1], token[0]))
+                return NULL;
+            pilha[topo - 2] = novoItem;
+            valoresPilha[topo - 2] = novoValor;
+            topo--;
+        } else if (ehOperadorUnario(token)) {
+            ItemInfixo novoItem;
+            float novoValor;
+            if (topo < 1) return NULL;
+            if (eValorInvalidoUnario(valoresPilha[topo - 1], token)) return NULL;
+            if (!aplicaUnario(valoresPilha[topo - 1], token, &novoValor)) return NULL;
+            if (!montaExpressaoUnaria(&novoItem, &pilha[topo - 1], token)) return NULL;
+            pilha[topo - 1] = novoItem;
+            valoresPilha[topo - 1] = novoValor;
+        } else {
+            return NULL;
+        }
+        token = strtok(NULL, " \t\r\n");
+    }
+
+    if (topo != 1) return NULL;
+
+    char *resultado = (char *)malloc(strlen(pilha[0].texto) + 1);
+    if (resultado == NULL) return NULL;
+    strcpy(resultado, pilha[0].texto);
+    return resultado;
+}
+
+float getValor(char *Str) {
+    char copia[MAX_EXPR];
+    char *token = NULL;
+    float pilha[MAX_TOKENS];
+    int topo = 0;
+
+    if (Str == NULL || strlen(Str) >= sizeof(copia)) return NAN;
+    strcpy(copia, Str);
+    token = strtok(copia, " \t\r\n");
+
+    while (token != NULL) {
+        float valorNumerico;
+        if (ehNumero(token, &valorNumerico)) {
+            if (topo >= MAX_TOKENS) return NAN;
+            pilha[topo] = valorNumerico;
+            topo++;
+        } else if (ehOperadorBinario(token)) {
+            float resultado;
+            if (topo < 2) return NAN;
+            if (!aplicaBinario(pilha[topo - 2], pilha[topo - 1], token[0], &resultado))
+                return NAN;
+            pilha[topo - 2] = resultado;
+            topo--;
+        } else if (ehOperadorUnario(token)) {
+            float resultado;
+            if (topo < 1) return NAN;
+            if (!aplicaUnario(pilha[topo - 1], token, &resultado))
+                return NAN;
+            pilha[topo - 1] = resultado;
+        } else {
+            return NAN;
+        }
+        token = strtok(NULL, " \t\r\n");
+    }
+
+    if (topo != 1) return NAN;
+    return pilha[0];
+}
